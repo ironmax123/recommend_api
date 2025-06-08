@@ -12,7 +12,7 @@ from urllib.parse import quote_plus
 app = FastAPI()
 
 # Sentence‑BERT モデルを一度だけロードして再利用
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer("paraphrase-MiniLM-L3-v2")
 
 class BookInfo(BaseModel):
     title: str
