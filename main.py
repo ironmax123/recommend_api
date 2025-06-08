@@ -22,7 +22,7 @@ class BooksRequest(BaseModel):
     books: list[BookInfo]
 
 
-@app.post("/recommend")
+@app.post("v1/api/recommend")
 def recommend_books(payload: BooksRequest):
     """複数の本情報（タイトルと説明）を受け取り、
     Google Books API の候補とベクトル類似度を比較して
