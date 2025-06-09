@@ -15,7 +15,7 @@ from janome.tokenizer import Tokenizer
 app = FastAPI()
 
 # Sentence‑BERT モデルを一度だけロードして再利用
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L3-v2")
 
 class BookInfo(BaseModel):
     title: str
@@ -45,8 +45,8 @@ def recommend_books(payload: BooksRequest):
     word_vectors = model.encode(words)
     sim_scores = cosine_similarity([doc_vector], word_vectors)[0]
 
-    # 4. 上位2語
-    top_idx = sim_scores.argsort()[-2:][::-1]
+    # 4. 上位5語
+    top_idx = sim_scores.argsort()[-5:][::-1]
     keywords = [words[i] for i in top_idx]
 
     # 5. Google Books API検索
@@ -79,7 +79,6 @@ def recommend_books(payload: BooksRequest):
         "authors": info.get("authors"),
         "description": info.get("description"),
         "thumbnail": info.get("imageLinks", {}).get("thumbnail"),
-        "query_keywords": keywords,
     }
 
 if __name__ == "__main__":
