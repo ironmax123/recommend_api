@@ -7,12 +7,15 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from urllib.parse import quote_plus
+from sklearn.feature_extraction.text import CountVectorizer
+from janome.tokenizer import Tokenizer
+
 
 
 app = FastAPI()
 
 # Sentence‑BERT モデルを一度だけロードして再利用
-model = SentenceTransformer("paraphrase-MiniLM-L3-v2")
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 class BookInfo(BaseModel):
     title: str
@@ -20,55 +23,55 @@ class BookInfo(BaseModel):
 
 class BooksRequest(BaseModel):
     books: list[BookInfo]
+  
 
 
-@app.post("v1/api/recommend")
+@app.post("/api/v1/recommend")
 def recommend_books(payload: BooksRequest):
-    """複数の本情報（タイトルと説明）を受け取り、
-    Google Books API の候補とベクトル類似度を比較して
-    最も近い一冊を返す。
-    """
-    # --- 1) ユーザ入力ベクトルをまとめて生成 -----------------------------
     texts = [f"{b.title} {b.description or ''}" for b in payload.books]
-    user_vectors = model.encode(texts)  # shape = (N_user, dim)
+    full_text = " ".join(texts)
+    
+    # 1. 形態素解析で名詞のみ抽出
+    t = Tokenizer()
+    words = [token.surface for token in t.tokenize(full_text) if token.part_of_speech.startswith('名詞')]
+    words = list(set(words))
+    if len(words) < 2:
+        return {"message": "特徴語が抽出できません"}
 
-    # --- 2) Google Books API で候補を最大 10 件取得 ------------------------
-    #     タイトルと説明を空白区切りで単純連結して検索文字列にする
-    query_text = " ".join(texts)
+    # 2. 全体ベクトル化
+    doc_vector = model.encode([full_text])[0]
+
+    # 3. 各単語をベクトル化→コサイン類似度
+    word_vectors = model.encode(words)
+    sim_scores = cosine_similarity([doc_vector], word_vectors)[0]
+
+    # 4. 上位2語
+    top_idx = sim_scores.argsort()[-2:][::-1]
+    keywords = [words[i] for i in top_idx]
+
+    # 5. Google Books API検索
+    query = "+".join(keywords)
+    print(query)
     url = (
         "https://www.googleapis.com/books/v1/volumes?"
-        f"q={quote_plus(query_text)}"
+        f"q={quote_plus(query)}"
         "&maxResults=10"
         "&language=ja"
     )
-
     response = requests.get(url)
-    data = response.json()
+    if response.status_code != 200:
+        return {"message": "Google Books APIリクエスト失敗", "detail": response.text}
 
-    if "items" not in data:
+    try:
+        data = response.json()
+    except Exception as e:
+        return {"message": f"JSONデコード失敗: {e}", "detail": response.text}
+
+    if "items" not in data or not data["items"]:
         return {"message": "おすすめの本が見つかりませんでした。"}
 
-    # --- 3) 候補ごとにベクトルを計算し、コサイン類似度 ----------------
-    items = data["items"]
-    candidate_texts = [
-        f"{it.get('volumeInfo', {}).get('title', '')} "
-        f"{it.get('volumeInfo', {}).get('description', '')}"
-        for it in items
-    ]
-    cand_vectors = model.encode(candidate_texts)   # shape = (M, dim)
-
-    # --- 4) 類似度行列を計算し，各候補に対して「ユーザ本の中で最も近いスコア」を採用 ---
-    sim_matrix = cosine_similarity(user_vectors, cand_vectors)  # (N_user, M)
-    sims = np.max(sim_matrix, axis=0)   # shape = (M,)
-
-    # --- 5) スコア 0.6 以上に絞り，その中で最大スコアの候補を選択 ---------------------
-    candidate_idxs = np.where(sims >= 0.6)[0]
-    if candidate_idxs.size == 0:
-        # しきい値を満たす候補がなければ全体から最大値
-        best_idx = int(np.argmax(sims))
-    else:
-        best_idx = int(candidate_idxs[np.argmax(sims[candidate_idxs])])
-    recommended = items[best_idx]
+    # 一番上の本を返す
+    recommended = data["items"][0]
     info = recommended.get("volumeInfo", {})
 
     return {
@@ -76,16 +79,13 @@ def recommend_books(payload: BooksRequest):
         "authors": info.get("authors"),
         "description": info.get("description"),
         "thumbnail": info.get("imageLinks", {}).get("thumbnail"),
-        "similarity_score": float(sims[best_idx]),
+        "query_keywords": keywords,
     }
 
-# --- Run the FastAPI app locally -----------------------------
-# This allows you to start the server with `python main.py`
-# or continue to use `uvicorn main:app --reload` if you prefer.
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True,   # auto‑reload on code changes (development use)
+        reload=True,
     )
