@@ -15,7 +15,7 @@ from janome.tokenizer import Tokenizer
 app = FastAPI()
 
 # Sentence‑BERT モデルを一度だけロードして再利用
-model = SentenceTransformer("sentence-transformers/paraphrase-MiniLM-L3-v2")
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 class BookInfo(BaseModel):
     title: str
@@ -33,7 +33,7 @@ def recommend_books(payload: BooksRequest):
     
     # 1. 形態素解析で名詞のみ抽出
     t = Tokenizer()
-    words = [token.surface for token in t.tokenize(full_text) if token.part_of_speech.startswith('名詞')]
+    words = [token.surface for token in t.tokenize(full_text) if token.part_of_speech.startswith('名詞,固有名詞')]
     words = list(set(words))
     if len(words) < 2:
         return {"message": "特徴語が抽出できません"}
